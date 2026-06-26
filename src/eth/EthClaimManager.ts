@@ -270,7 +270,7 @@ export class EthClaimManager {
         await ServiceManager.GetService(EthWalletManager).loadWalletState();
       }
 
-      if(faucetConfig.ethRefillContract && walletState.ready)
+      if(faucetConfig.ethRefillContract && mainWalletState?.ready)
         await ServiceManager.GetService(EthWalletRefill).processWalletRefill();
 
       if(!this.lastClaimNotification || this.lastClaimNotification.processedIdx !== this.lastProcessedClaimTxIdx || this.lastClaimNotification.confirmedIdx !== this.lastConfirmedClaimTxIdx) {

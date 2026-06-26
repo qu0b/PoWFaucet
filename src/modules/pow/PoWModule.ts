@@ -33,7 +33,7 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     // register REST API endpoints for agent-friendly PoW
     let webApi = ServiceManager.GetService(FaucetWebApi);
     webApi.registerApiEndpoint("powChallenge", (req, url, body) => this.handlePowChallenge(req, url));
-    webApi.registerApiEndpoint("powSubmit", (req, url, body) => this.handlePowSubmit(req, url));
+    webApi.registerApiEndpoint("powSubmit", (req, url, body) => this.handlePowSubmit(req, url, body));
     webApi.registerApiEndpoint("powCloseSession", (req, url, body) => this.handlePowCloseSession(req, url));
 
     // register faucet action hooks

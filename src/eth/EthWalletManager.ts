@@ -376,6 +376,26 @@ export class EthWalletManager {
     });
   }
 
+  public async watchRestClaimTx(claimInfo: EthClaimInfo): Promise<{
+    status: boolean;
+    block: number;
+    fee: bigint;
+    receipt: TransactionReceipt;
+  }> {
+    return this.awaitTransactionReceipt(claimInfo.claim.txHash, claimInfo.claim.txNonce).then((receipt) => {
+      let txfee = BigInt(receipt.effectiveGasPrice) * BigInt(receipt.gasUsed);
+      this.restWalletState.nativeBalance -= txfee;
+      if(!this.tokenState)
+        this.restWalletState.balance -= txfee;
+      return {
+        status: Number(receipt.status) > 0,
+        block: Number(receipt.blockNumber),
+        fee: txfee,
+        receipt: receipt,
+      };
+    });
+  }
+
   public async sendClaimTx(claimInfo: EthClaimInfo): Promise<TransactionResult> {
     let txPromise: Promise<TransactionReceipt>;
     let retryCount = 0;
