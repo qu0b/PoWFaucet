@@ -12,6 +12,7 @@ import { PoWValidator } from "./validator/PoWValidator.js";
 import { SessionManager } from "../../session/SessionManager.js";
 import { PoWClient } from "./PoWClient.js";
 import { PoWSession } from "./PoWSession.js";
+import { RateLimiter } from "./RateLimiter.js";
 import { FaucetError } from "../../common/FaucetError.js";
 import { FaucetLogLevel, FaucetProcess } from "../../common/FaucetProcess.js";
 import { FaucetStatsLog } from "../../services/FaucetStatsLog.js";
@@ -25,8 +26,14 @@ export class PoWModule extends BaseModule<IPoWConfig> {
   protected readonly moduleDefaultConfig = defaultConfig;
  
   private powServers: {[serverId: string]: PoWServer} = {};
+  private restRateLimiter: RateLimiter;
 
   protected override startModule(): Promise<void> {
+    this.restRateLimiter = new RateLimiter(
+      this.moduleConfig.restRateLimitMax,
+      this.moduleConfig.restRateLimitWindow,
+    );
+
     // register websocket endpoint (/pow)
     ServiceManager.GetService(FaucetHttpServer).addRawEndpoint("pow", /^\/ws\/pow($|\?)/, (req, socket, head, ip) => this.processPoWClientWebSocket(req, socket, head, ip));
 
@@ -61,6 +68,7 @@ export class PoWModule extends BaseModule<IPoWConfig> {
   }
 
   protected override stopModule(): Promise<void> {
+    this.restRateLimiter.destroy();
     ServiceManager.GetService(FaucetHttpServer).removeWssEndpoint("pow");
     ServiceManager.GetService(FaucetWebApi).removeApiEndpoint("powChallenge");
     ServiceManager.GetService(FaucetWebApi).removeApiEndpoint("powSubmit");
@@ -273,6 +281,11 @@ export class PoWModule extends BaseModule<IPoWConfig> {
   }
 
   private async handlePowChallenge(req: IncomingMessage, url: IFaucetApiUrl): Promise<any> {
+    let webApi = ServiceManager.GetService(FaucetWebApi);
+    let remoteIp = webApi.getRemoteAddr(req);
+    if(!this.restRateLimiter.isAllowed(remoteIp))
+      return new FaucetHttpResponse(429, "Too Many Requests", "Rate limit exceeded. Try again later.");
+
     let sessionId = url.query['session'] as string;
     if (!sessionId)
       return new FaucetHttpResponse(400, "Bad Request", "Missing session parameter");
@@ -346,6 +359,11 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     if (req.method !== "POST")
       return new FaucetHttpResponse(405, "Method Not Allowed");
 
+    let webApi = ServiceManager.GetService(FaucetWebApi);
+    let remoteIp = webApi.getRemoteAddr(req);
+    if(!this.restRateLimiter.isAllowed(remoteIp))
+      return { valid: false, error: "Rate limit exceeded. Try again later." };
+
     let input: any;
     try {
       input = JSON.parse(body.toString("utf8"));
@@ -404,6 +422,11 @@ export class PoWModule extends BaseModule<IPoWConfig> {
   }
 
   private async handlePowCloseSession(req: IncomingMessage, url: IFaucetApiUrl): Promise<any> {
+    let webApi = ServiceManager.GetService(FaucetWebApi);
+    let remoteIp = webApi.getRemoteAddr(req);
+    if(!this.restRateLimiter.isAllowed(remoteIp))
+      return new FaucetHttpResponse(429, "Too Many Requests", "Rate limit exceeded. Try again later.");
+
     let sessionId = url.query['session'] as string;
     if (!sessionId)
       return new FaucetHttpResponse(400, "Bad Request", "Missing session parameter");

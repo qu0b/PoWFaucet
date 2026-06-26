@@ -36,6 +36,10 @@ export interface IPoWConfig extends IBaseModuleConfig {
   verifyMinerTimeout: number; // timeout for verification requests (client gets penalized if not responding within this timespan)
   verifyMinerRewardPerc: number; // percent of powShareReward as reward for responding to a verification request in time
   verifyMinerMissPenaltyPerc: number; // percent of powShareReward as penalty for not responding to a verification request (shouldn't be too high as this can happen regularly in case of connection loss or so)
+
+  /* REST API rate limiting */
+  restRateLimitMax: number; // max REST API requests per IP per window
+  restRateLimitWindow: number; // rate limit window in ms
 }
 
 export enum PoWHashAlgo {
@@ -133,4 +137,6 @@ export const defaultConfig: IPoWConfig = {
   verifyMinerTimeout: 30,
   verifyMinerRewardPerc: 15,
   verifyMinerMissPenaltyPerc: 10,
+  restRateLimitMax: 10,
+  restRateLimitWindow: 10000,
 }
