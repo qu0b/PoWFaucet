@@ -108,7 +108,7 @@ export const defaultConfig: IPoWConfig = {
     type: 0,
     version: 13,
     timeCost: 4,
-    memoryCost: 4096,
+    memoryCost: 131072, // 128 MiB per hash — memory-hardness is what biases PoW toward CPUs over GPUs/ASICs
     parallelization: 1,
     keyLength: 16,
   },
