@@ -1,6 +1,6 @@
 {
   "name": "@powfaucet/server",
-  "version": "2.5.0-agent.2",
+  "version": "2.5.0-agent.3",
   "description": "PoW Faucet Server",
   "main": "dist/app.js",
   "bin": "bundle/powfaucet.cjs",
