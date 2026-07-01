@@ -374,6 +374,10 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     if (!input.session || input.nonce === undefined)
       return { valid: false, error: "Missing session or nonce" };
 
+    let nonce = typeof input.nonce === "number" ? input.nonce : parseInt(input.nonce, 10);
+    if (!Number.isInteger(nonce) || nonce < 0)
+      return { valid: false, error: "Invalid nonce" };
+
     let session = ServiceManager.GetService(SessionManager).getSession(input.session, [FaucetSessionStatus.RUNNING]);
     if (!session)
       return { valid: false, error: "Session not found or not running" };
@@ -381,9 +385,11 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     if(session.getSessionData<Array<string>>("skip.modules", []).indexOf(this.moduleName) !== -1)
       return { valid: false, error: "PoW module is skipped for this session" };
 
+    // Nonces must strictly increase: reject anything <= the last accepted nonce
+    // (mirrors the WebSocket path's lastNonce guard) so a valid share can't be replayed.
     let restNonceEnd = session.getSessionData("pow.restNonce", 0) as number;
-    let restSubmittedNonce = session.getSessionData("pow.restSubmittedNonce", 0) as number;
-    if (input.nonce < restSubmittedNonce || input.nonce >= restNonceEnd)
+    let restSubmittedNonce = session.getSessionData("pow.restSubmittedNonce", -1) as number;
+    if (nonce <= restSubmittedNonce || nonce >= restNonceEnd)
       return { valid: false, error: "Nonce out of range or already submitted" };
 
     let powServer: PoWServer;
@@ -397,13 +403,13 @@ export class PoWModule extends BaseModule<IPoWConfig> {
 
     let result: {isValid: boolean};
     try {
-      result = await powServer.validateShareREST(session.getSessionId(), input.nonce, input.data || "");
+      result = await powServer.validateShareREST(session.getSessionId(), nonce, input.data || "");
     } catch(ex) {
       return { valid: false, error: "Validation error: " + (ex.message || ex) };
     }
 
     if (result.isValid) {
-      session.setSessionData("pow.restSubmittedNonce", input.nonce);
+      session.setSessionData("pow.restSubmittedNonce", nonce);
       session.setSessionData("pow.restSession", true);
       let rewardAmount = BigInt(this.moduleConfig.powShareReward);
       await session.addReward(rewardAmount);
