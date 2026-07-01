@@ -126,24 +126,19 @@ def try_nonce(nonce: int, preimage_b64: str, params: dict, difficulty: int, algo
         hash_hex = digest.hex()
     elif algo == 'argon2':
         # Requires: pip install argon2-cffi
-        from argon2 import PasswordHasher
-        # argon2-cffi expects password and salt as bytes
-        pw = nonce_hex.encode()
-        salt = preimg_hex.encode()
-        mem = params['memoryCost']  # in KiB
-        iters = params['timeCost']
-        pll = params['parallelization']
-        outlen = params['keyLength']
-        # Use low-level API
         import argon2.low_level as ll
+        # Password = the RAW nonce bytes, salt = the RAW preimage bytes.
+        # (decode the hex strings — do NOT pass their ASCII text.)
+        pw = bytes.fromhex(nonce_hex)
+        salt = bytes.fromhex(preimg_hex)
         raw = ll.hash_secret_raw(
             secret=pw,
             salt=salt,
-            time_cost=iters,
-            memory_cost=mem,
-            parallelism=pll,
-            hash_len=outlen,
-            type=ll.Type.ID if params['type'] == 1 else ll.Type.I,
+            time_cost=params['timeCost'],
+            memory_cost=params['memoryCost'],   # in KiB
+            parallelism=params['parallelization'],
+            hash_len=params['keyLength'],
+            type=ll.Type(params['type']),        # 0 = Argon2d, 1 = Argon2i, 2 = Argon2id
             version=params['version'],
         )
         hash_hex = raw.hex()
@@ -191,9 +186,10 @@ async function tryNonce(nonce, preimageB64, params, difficulty, algo) {
   } else if (algo === 'argon2') {
     // npm install argon2
     const argon2 = await import('argon2');
-    const buf = await argon2.hash(Buffer.from(nonceHex), {
-      salt: Buffer.from(preimgHex),
-      type: params.type,     // argon2.argon2id = 2
+    // Decode the hex strings to their RAW bytes (do NOT hash their ASCII text).
+    const buf = await argon2.hash(Buffer.from(nonceHex, 'hex'), {
+      salt: Buffer.from(preimgHex, 'hex'),
+      type: params.type,     // 0 = argon2d, 1 = argon2i, 2 = argon2id
       timeCost: params.timeCost,
       memoryCost: params.memoryCost, // in KiB
       parallelism: params.parallelization,

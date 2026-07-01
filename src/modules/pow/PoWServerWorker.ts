@@ -8,7 +8,6 @@ import { IPoWConfig, PoWHashAlgo } from "./PoWConfig.js";
 import { PoWValidator } from "./validator/PoWValidator.js";
 import { PoWClient } from "./PoWClient.js";
 import { ProcessLoadTracker } from "../../utils/ProcessLoadTracker.js";
-import { base64ToHex } from "../../utils/ConvertHelpers.js";
 
 interface IPoWConnectRequest {
   action: "pow-connect";
@@ -315,11 +314,12 @@ export class PoWServerWorker {
       session.idleTimer = null;
     }
 
-    let preimg = base64ToHex(session.preImage || "");
     let internalShareId = "rest-" + msg.shareId;
 
     try {
-      let isValid = await this.validator.validateShare(internalShareId, msg.nonce, preimg, msg.data);
+      // validateShare base64ToHex-es the preimage itself (see the WS path in
+      // PoWShareVerification), so pass the raw base64 preImage — NOT a pre-hexed one.
+      let isValid = await this.validator.validateShare(internalShareId, msg.nonce, session.preImage || "", msg.data);
       this.sendMessage({
         action: "pow-rest-share-validated",
         shareId: msg.shareId,
