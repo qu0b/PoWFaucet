@@ -105,10 +105,10 @@ export const defaultConfig: IPoWConfig = {
     height: 0,
   },
   powArgon2Params: {
-    type: 0,
-    version: 13,
-    timeCost: 4,
-    memoryCost: 131072, // 128 MiB per hash — memory-hardness is what biases PoW toward CPUs over GPUs/ASICs
+    type: 2, // Argon2id — the standard variant every argon2 library implements
+    version: 19, // 0x13, the current Argon2 version; matches golang.org/x/crypto, argon2-cffi, npm argon2
+    timeCost: 3,
+    memoryCost: 16384, // 16 MiB — light enough for sub-second CPU hashing so any device can mine quickly
     parallelization: 1,
     keyLength: 16,
   },
