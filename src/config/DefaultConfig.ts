@@ -39,7 +39,7 @@ export function getDefaultConfig(): IConfigSchema {
     ethWalletKey: null, // mandatory
     ethRestWalletKey: null, // optional second wallet for REST-API sessions
     ethChainId: null,
-    ethTxGasLimit: 100000,
+    ethTxGasLimit: 250000, // covers a transfer creating the recipient account under Amsterdam gas rules (~207k measured)
     ethLegacyTx: false,
     ethTxMaxFee: 100000000000,
     ethTxPrioFee: 2000000000,
