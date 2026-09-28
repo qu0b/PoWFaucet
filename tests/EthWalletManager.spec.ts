@@ -54,6 +54,20 @@ describe("ETH Wallet Manager", () => {
     expect(ethWalletManager.getFaucetBalance()).equal(1000n, "unexpected balance");
   });
 
+  it("retries a target balance read on another ready RPC endpoint", async () => {
+    let ethWalletManager = new EthWalletManager();
+    let attempted: string[] = [];
+    (ethWalletManager as any).rpcPool = {
+      getReadyEndpoints: () => [
+        {web3: {eth: {getBalance: async () => { attempted.push("first"); throw new Error("RPC unavailable"); }}}},
+        {web3: {eth: {getBalance: async () => { attempted.push("second"); return 42n; }}}},
+      ],
+    };
+
+    expect(await ethWalletManager.getWalletBalance("0x0000000000000000000000000000000000001337")).to.equal(42n);
+    expect(attempted).to.deep.equal(["first", "second"]);
+  });
+
   it("check wallet state initialization (pending not supported)", async () => {
     let ethWalletManager = new EthWalletManager();
     fakeProvider.injectResponse("eth_chainId", 1337);

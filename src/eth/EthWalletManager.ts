@@ -335,8 +335,23 @@ export class EthWalletManager {
   public async getWalletBalance(addr: string): Promise<bigint> {
     if(this.tokenState)
       return await this.tokenState.getBalance(addr);
-    else
-      return BigInt(await this.web3.eth.getBalance(addr));
+
+    // A health check can succeed just before an execution RPC starts failing.
+    // Balance checks gate new faucet sessions, so retry another ready endpoint
+    // instead of rejecting the session on one transient read error.
+    let endpoints = this.rpcPool.getReadyEndpoints();
+    if(endpoints.length === 0)
+      endpoints = this.rpcPool.getEndpoints();
+
+    let lastError: unknown;
+    for(const endpoint of endpoints) {
+      try {
+        return BigInt(await endpoint.web3.eth.getBalance(addr));
+      } catch(ex) {
+        lastError = ex;
+      }
+    }
+    throw lastError || new Error("No execution RPC endpoints configured");
   }
 
   public checkIsContract(addr: string): Promise<boolean> {
