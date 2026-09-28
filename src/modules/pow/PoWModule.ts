@@ -390,6 +390,10 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     if (nonce <= restSubmittedNonce || nonce >= restNonceEnd)
       return { valid: false, error: "Nonce out of range or already submitted" };
 
+    // Reserve before awaiting the worker: concurrent copies of a valid share
+    // must not both pass the replay check and receive rewards.
+    session.setSessionData("pow.restSubmittedNonce", nonce);
+
     let powServer: PoWServer;
     try {
       powServer = await session.getSessionModuleRef("pow.serverPromise");
@@ -407,7 +411,6 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     }
 
     if (result.isValid) {
-      session.setSessionData("pow.restSubmittedNonce", nonce);
       session.setSessionData("pow.restSession", true);
       let rewardAmount = BigInt(this.moduleConfig.powShareReward);
       await session.addReward(rewardAmount);
@@ -437,7 +440,7 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     if(!this.restRateLimiter.isAllowed(sessionId))
       return new FaucetHttpResponse(429, "Too Many Requests", "Rate limit exceeded. Try again later.");
 
-    this.processPoWSessionClose(session);
+    await this.processPoWSessionClose(session);
     let info = await session.getSessionInfo();
     return info;
   }

@@ -38,7 +38,7 @@ export interface IPoWConfig extends IBaseModuleConfig {
   verifyMinerMissPenaltyPerc: number; // percent of powShareReward as penalty for not responding to a verification request (shouldn't be too high as this can happen regularly in case of connection loss or so)
 
   /* REST API rate limiting */
-  restRateLimitMax: number; // max REST API requests per IP per window
+  restRateLimitMax: number; // max REST mining requests per session per window
   restRateLimitWindow: number; // rate limit window in ms
 }
 

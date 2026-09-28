@@ -337,21 +337,21 @@ export class EthWalletManager {
       return await this.tokenState.getBalance(addr);
 
     // A health check can succeed just before an execution RPC starts failing.
-    // Balance checks gate new faucet sessions, so retry another ready endpoint
-    // instead of rejecting the session on one transient read error.
+    // A healthy endpoint can also lag on account state. Query up to three ready
+    // endpoints and use the highest balance so a stale low reading cannot
+    // bypass the recipient balance ceiling.
     let endpoints = this.rpcPool.getReadyEndpoints();
     if(endpoints.length === 0)
       endpoints = this.rpcPool.getEndpoints();
 
-    let lastError: unknown;
-    for(const endpoint of endpoints) {
-      try {
-        return BigInt(await endpoint.web3.eth.getBalance(addr));
-      } catch(ex) {
-        lastError = ex;
-      }
-    }
-    throw lastError || new Error("No execution RPC endpoints configured");
+    if(endpoints.length === 0)
+      throw new Error("No execution RPC endpoints configured");
+    let results = await Promise.allSettled(endpoints.slice(0, 3).map((endpoint) => endpoint.web3.eth.getBalance(addr)));
+    let balances = results.filter((result): result is PromiseFulfilledResult<bigint> => result.status === "fulfilled")
+      .map((result) => BigInt(result.value));
+    if(balances.length === 0)
+      throw (results[0] as PromiseRejectedResult).reason;
+    return balances.reduce((highest, balance) => balance > highest ? balance : highest);
   }
 
   public checkIsContract(addr: string): Promise<boolean> {

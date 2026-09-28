@@ -160,6 +160,36 @@ describe("Faucet module: pow", () => {
     expect(repeated.code).to.equal(429);
   });
 
+  it("does not reward concurrent submissions of the same REST share twice", async () => {
+    faucetConfig.modules["pow"] = {
+      enabled: true, powShareReward: 10,
+    } as IPoWConfig;
+    let moduleManager = ServiceManager.GetService(ModuleManager);
+    await moduleManager.initialize();
+    let session = await ServiceManager.GetService(SessionManager).createSession("8.8.8.8", {
+      addr: "0x0000000000000000000000000000000000001337",
+    });
+    let pow = moduleManager.getModule<PoWModule>("pow") as any;
+    await pow.handlePowChallenge({} as any, {query: {session: session.getSessionId()}});
+
+    let finishValidation: (result: {isValid: boolean}) => void;
+    let validation = new Promise<{isValid: boolean}>((resolve) => { finishValidation = resolve; });
+    let validations = 0;
+    session.setSessionModuleRef("pow.serverPromise", Promise.resolve({
+      validateShareREST: () => { validations++; return validation; },
+    }));
+    let body = Buffer.from(JSON.stringify({session: session.getSessionId(), nonce: 1}));
+    let first = pow.handlePowSubmit({method: "POST"} as any, {} as any, body);
+    let replay = await pow.handlePowSubmit({method: "POST"} as any, {} as any, body);
+    finishValidation({isValid: true});
+    let accepted = await first;
+
+    expect(accepted.valid).to.equal(true);
+    expect(replay.valid).to.equal(false);
+    expect(validations).to.equal(1);
+    expect(session.getDropAmount()).to.equal(10n);
+  });
+
   it("Start mining session and connect mining client", async () => {
     faucetConfig.modules["pow"] = {
       enabled: true,
