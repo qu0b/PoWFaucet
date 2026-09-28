@@ -11,6 +11,7 @@ import { IPoWConfig, PoWHashAlgo } from '../../src/modules/pow/PoWConfig.js';
 import { FaucetWebApi } from '../../src/webserv/FaucetWebApi.js';
 import { disposeFakeWebSockets, FakeWebSocket, injectFakeWebSocket } from '../stubs/FakeWebSocket.js';
 import { PoWModule } from '../../src/modules/pow/PoWModule.js';
+import { FaucetHttpResponse } from '../../src/webserv/FaucetHttpServer.js';
 
 
 describe("Faucet module: pow", () => {
@@ -134,6 +135,59 @@ describe("Faucet module: pow", () => {
     expect((clientInfo.modules as any)["pow"].lastNonce).to.equal(0, "invalid pow info in client session info: lastNonce");
     expect((clientInfo.modules as any)["pow"].preImage).to.equal(testSession.getSessionData("pow.preimage"), "invalid pow info in client session info: preImage");
     expect((clientInfo.modules as any)["pow"].shareCount).to.equal(0, "invalid pow info in client session info: shareCount");
+  });
+
+  it("limits REST mining requests per session, even behind one proxy IP", async () => {
+    faucetConfig.modules["pow"] = {
+      enabled: true,
+      restRateLimitMax: 1,
+      restRateLimitWindow: 10000,
+    } as IPoWConfig;
+    let moduleManager = ServiceManager.GetService(ModuleManager);
+    await moduleManager.initialize();
+    let sessions = ServiceManager.GetService(SessionManager);
+    let first = await sessions.createSession("8.8.8.8", {addr: "0x0000000000000000000000000000000000001337"});
+    let second = await sessions.createSession("8.8.8.8", {addr: "0x0000000000000000000000000000000000001338"});
+    let pow = moduleManager.getModule<PoWModule>("pow") as any;
+
+    let firstChallenge = await pow.handlePowChallenge({} as any, {query: {session: first.getSessionId()}});
+    let secondChallenge = await pow.handlePowChallenge({} as any, {query: {session: second.getSessionId()}});
+    let repeated = await pow.handlePowChallenge({} as any, {query: {session: first.getSessionId()}});
+
+    expect(firstChallenge).to.have.property("nonceStart");
+    expect(secondChallenge).to.have.property("nonceStart");
+    expect(repeated).to.be.instanceOf(FaucetHttpResponse);
+    expect(repeated.code).to.equal(429);
+  });
+
+  it("does not reward concurrent submissions of the same REST share twice", async () => {
+    faucetConfig.modules["pow"] = {
+      enabled: true, powShareReward: 10,
+    } as IPoWConfig;
+    let moduleManager = ServiceManager.GetService(ModuleManager);
+    await moduleManager.initialize();
+    let session = await ServiceManager.GetService(SessionManager).createSession("8.8.8.8", {
+      addr: "0x0000000000000000000000000000000000001337",
+    });
+    let pow = moduleManager.getModule<PoWModule>("pow") as any;
+    await pow.handlePowChallenge({} as any, {query: {session: session.getSessionId()}});
+
+    let finishValidation: (result: {isValid: boolean}) => void;
+    let validation = new Promise<{isValid: boolean}>((resolve) => { finishValidation = resolve; });
+    let validations = 0;
+    session.setSessionModuleRef("pow.serverPromise", Promise.resolve({
+      validateShareREST: () => { validations++; return validation; },
+    }));
+    let body = Buffer.from(JSON.stringify({session: session.getSessionId(), nonce: 1}));
+    let first = pow.handlePowSubmit({method: "POST"} as any, {} as any, body);
+    let replay = await pow.handlePowSubmit({method: "POST"} as any, {} as any, body);
+    finishValidation({isValid: true});
+    let accepted = await first;
+
+    expect(accepted.valid).to.equal(true);
+    expect(replay.valid).to.equal(false);
+    expect(validations).to.equal(1);
+    expect(session.getDropAmount()).to.equal(10n);
   });
 
   it("Start mining session and connect mining client", async () => {

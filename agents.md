@@ -294,6 +294,10 @@ Content-Type: application/json
 {"session": "<sessionId>"}
 ```
 
+Agent clients may add `"amountWei": "1000000000000000000"` to request an exact
+payout after mining. The value must be a decimal wei string between the faucet's
+minimum drop and the earned session balance. Omit it to claim the full balance.
+
 Response:
 ```json
 {

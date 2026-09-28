@@ -335,8 +335,23 @@ export class EthWalletManager {
   public async getWalletBalance(addr: string): Promise<bigint> {
     if(this.tokenState)
       return await this.tokenState.getBalance(addr);
-    else
-      return BigInt(await this.web3.eth.getBalance(addr));
+
+    // A health check can succeed just before an execution RPC starts failing.
+    // A healthy endpoint can also lag on account state. Query up to three ready
+    // endpoints and use the highest balance so a stale low reading cannot
+    // bypass the recipient balance ceiling.
+    let endpoints = this.rpcPool.getReadyEndpoints();
+    if(endpoints.length === 0)
+      endpoints = this.rpcPool.getEndpoints();
+
+    if(endpoints.length === 0)
+      throw new Error("No execution RPC endpoints configured");
+    let results = await Promise.allSettled(endpoints.slice(0, 3).map((endpoint) => endpoint.web3.eth.getBalance(addr)));
+    let balances = results.filter((result): result is PromiseFulfilledResult<bigint> => result.status === "fulfilled")
+      .map((result) => BigInt(result.value));
+    if(balances.length === 0)
+      throw (results[0] as PromiseRejectedResult).reason;
+    return balances.reduce((highest, balance) => balance > highest ? balance : highest);
   }
 
   public checkIsContract(addr: string): Promise<boolean> {
