@@ -4,11 +4,13 @@ import { expect } from 'chai';
 import { bindTestStubs, unbindTestStubs, loadDefaultTestConfig, awaitSleepPromise } from '../common.js';
 import { ServiceManager } from '../../src/common/ServiceManager.js';
 import { FaucetDatabase } from '../../src/db/FaucetDatabase.js';
-import { ModuleManager } from '../../src/modules/ModuleManager.js';
+import { ModuleHookAction, ModuleManager } from '../../src/modules/ModuleManager.js';
 import { SessionManager } from '../../src/session/SessionManager.js';
 import { faucetConfig } from '../../src/config/FaucetConfig.js';
 import { IRecurringLimitsConfig } from '../../src/modules/recurring-limits/RecurringLimitsConfig.js';
 import { FaucetError } from '../../src/common/FaucetError.js';
+import { FaucetSessionStatus } from '../../src/session/FaucetSession.js';
+import { getNewGuid } from '../../src/utils/GuidUtils.js';
 
 
 describe("Faucet module: recurring-limits", () => {
@@ -93,6 +95,37 @@ describe("Faucet module: recurring-limits", () => {
     expect(error).to.not.equal(null, "no exception thrown");
     expect(error instanceof FaucetError).to.equal(true, "unexpected error type");
     expect(error?.getCode()).to.equal("RECURRING_LIMIT", "unexpected error code");
+  });
+
+  it("enforces the amount limit against the proposed payout", async () => {
+    faucetConfig.maxDropAmount = 100;
+    faucetConfig.minDropAmount = 10;
+    faucetConfig.modules["recurring-limits"] = {
+      enabled: true,
+      limits: [{duration: 30, limitAmount: 100, byAddrOnly: true}],
+    } as IRecurringLimitsConfig;
+    let moduleManager = ServiceManager.GetService(ModuleManager);
+    await moduleManager.initialize();
+    await ServiceManager.GetService(FaucetDatabase).updateSession({
+      sessionId: getNewGuid(), startTime: Math.floor(Date.now() / 1000),
+      status: FaucetSessionStatus.FINISHED, dropAmount: "40", remoteIP: "8.8.8.8",
+      targetAddr: "0x0000000000000000000000000000000000001337",
+      tasks: [], data: {}, claim: null,
+    });
+    let current = await ServiceManager.GetService(SessionManager).createSession("8.8.8.8", {
+      addr: "0x0000000000000000000000000000000000001337",
+    });
+    let claim = {session: current.getSessionId(), target: current.getTargetAddr(), amount: "67"};
+
+    try {
+      await moduleManager.processActionHooks([], ModuleHookAction.SessionClaim, [claim, {}]);
+      throw new Error("expected recurring limit error");
+    } catch(ex) {
+      expect(ex).to.be.instanceOf(FaucetError);
+      expect((ex as FaucetError).getCode()).to.equal("RECURRING_LIMIT");
+    }
+    claim.amount = "60";
+    await moduleManager.processActionHooks([], ModuleHookAction.SessionClaim, [claim, {}]);
   });
 
   it("Exceed limit by ip & addr (session count)", async () => {

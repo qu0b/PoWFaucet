@@ -13,6 +13,7 @@ import { FaucetHttpServer } from '../webserv/FaucetHttpServer.js';
 import { IncomingMessage } from 'http';
 import { EthClaimNotificationClient, IEthClaimNotificationData } from './EthClaimNotificationClient.js';
 import { FaucetOutflowModule } from '../modules/faucet-outflow/FaucetOutflowModule.js';
+import { EthInfoModule } from '../modules/ethinfo/EthInfoModule.js';
 import { clearInterval } from 'timers';
 import { TransactionReceipt } from 'web3';
 
@@ -200,6 +201,18 @@ export class EthClaimManager {
       maxDropAmount = BigInt(sessionData.data["overrideMaxDropAmount"]);
     if(BigInt(sessionData.dropAmount) > maxDropAmount)
       sessionData.dropAmount = maxDropAmount.toString();
+
+    // Agent clients may mine more than the amount they need when a share is
+    // worth several ETH. Pay only the requested amount when one is supplied;
+    // the normal browser claim still pays the whole earned balance.
+    if(userInput?.amountWei !== undefined) {
+      if(typeof userInput.amountWei !== "string" || !/^[0-9]+$/.test(userInput.amountWei))
+        throw new FaucetError("INVALID_AMOUNT", "amountWei must be a decimal wei string");
+      let requestedAmount = BigInt(userInput.amountWei);
+      if(requestedAmount < BigInt(faucetConfig.minDropAmount) || requestedAmount > BigInt(sessionData.dropAmount))
+        throw new FaucetError("INVALID_AMOUNT", "amountWei must be between the minimum drop and earned balance");
+      sessionData.dropAmount = requestedAmount.toString();
+    }
     
     let claimInfo: EthClaimInfo = {
       session: sessionData.sessionId,
@@ -216,6 +229,21 @@ export class EthClaimManager {
         throw ex;
       else
         throw new FaucetError("INTERNAL_ERROR", "claimSession failed: " + ex.toString());
+    }
+
+    // The session-start check only sees the balance before mining. Check the
+    // actual payout too, including agent claims that use a partial amount.
+    let ethInfo = ServiceManager.GetService(ModuleManager).getModule<EthInfoModule>("ethinfo");
+    let maxBalance = ethInfo?.getModuleConfig().maxBalance || 0;
+    if(maxBalance > 0) {
+      let currentBalance: bigint;
+      try {
+        currentBalance = await ServiceManager.GetService(EthWalletManager).getWalletBalance(claimInfo.target);
+      } catch(ex) {
+        throw new FaucetError("BALANCE_ERROR", "Could not check wallet balance before payout: " + ex.toString());
+      }
+      if(currentBalance + BigInt(claimInfo.amount) > BigInt(maxBalance))
+        throw new FaucetError("BALANCE_LIMIT", "Claim would exceed the maximum wallet balance");
     }
     
     // prevent multi claim via race condition

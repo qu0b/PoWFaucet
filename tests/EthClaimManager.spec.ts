@@ -15,6 +15,7 @@ import { EthWalletManager, TransactionResult } from '../src/eth/EthWalletManager
 import { sleepPromise } from '../src/utils/PromiseUtils.js';
 import { FakeWebSocket, injectFakeWebSocket } from './stubs/FakeWebSocket.js';
 import { EthClaimNotificationClient } from '../src/eth/EthClaimNotificationClient.js';
+import { EthInfoModule } from '../src/modules/ethinfo/EthInfoModule.js';
 
 
 describe("ETH Claim Manager", () => {
@@ -243,6 +244,54 @@ describe("ETH Claim Manager", () => {
     let sessionData = await ServiceManager.GetService(SessionManager).getSessionData(testSession.sessionId);
     expect(sessionData.status).to.equal(FaucetSessionStatus.CLAIMING, "unexpected session status");
     expect(sessionData.dropAmount).to.equal("50", "unexpected session drop amount");
+  });
+
+  it("allows an agent to claim less than its earned mining balance", async () => {
+    let claimManager = ServiceManager.GetService(EthClaimManager);
+    await claimManager.initialize();
+    let session = await addTestSession(FaucetSessionStatus.CLAIMABLE, null, "100");
+
+    let claim = await claimManager.createSessionClaim(session, {amountWei: "67"});
+    expect(claim.amount).to.equal("67");
+    let stored = await ServiceManager.GetService(SessionManager).getSessionData(session.sessionId);
+    expect(stored.dropAmount).to.equal("67");
+  });
+
+  it("rejects an amount greater than the earned mining balance", async () => {
+    let claimManager = ServiceManager.GetService(EthClaimManager);
+    await claimManager.initialize();
+    let session = await addTestSession(FaucetSessionStatus.CLAIMABLE, null, "100");
+
+    try {
+      await claimManager.createSessionClaim(session, {amountWei: "101"});
+      throw new Error("expected an invalid amount error");
+    } catch(ex) {
+      expect(ex).to.be.instanceOf(FaucetError);
+      expect((ex as FaucetError).getCode()).to.equal("INVALID_AMOUNT");
+    }
+    expect(claimManager.getTransactionQueue().length).to.equal(0);
+  });
+
+  it("rejects a payout that would exceed the wallet balance limit", async () => {
+    let manager = ServiceManager.GetService(ModuleManager);
+    globalStubs["getEthInfoModule"] = sinon.stub(manager, "getModule").callsFake((name) => {
+      if(name === "ethinfo")
+        return {getModuleConfig: () => ({maxBalance: 100})} as EthInfoModule;
+      return null;
+    });
+    globalStubs["getWalletBalance"] = sinon.stub(EthWalletManager.prototype, "getWalletBalance").resolves(40n);
+    let claimManager = ServiceManager.GetService(EthClaimManager);
+    await claimManager.initialize();
+    let session = await addTestSession(FaucetSessionStatus.CLAIMABLE, null, "100");
+
+    try {
+      await claimManager.createSessionClaim(session, {amountWei: "67"});
+      throw new Error("expected balance limit error");
+    } catch(ex) {
+      expect(ex).to.be.instanceOf(FaucetError);
+      expect((ex as FaucetError).getCode()).to.equal("BALANCE_LIMIT");
+    }
+    expect(claimManager.getTransactionQueue().length).to.equal(0);
   });
 
   it("Queue processing: Check processing if wallet not ready (skip)", async () => {

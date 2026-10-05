@@ -281,11 +281,6 @@ export class PoWModule extends BaseModule<IPoWConfig> {
   }
 
   private async handlePowChallenge(req: IncomingMessage, url: IFaucetApiUrl): Promise<any> {
-    let webApi = ServiceManager.GetService(FaucetWebApi);
-    let remoteIp = webApi.getRemoteAddr(req);
-    if(!this.restRateLimiter.isAllowed(remoteIp))
-      return new FaucetHttpResponse(429, "Too Many Requests", "Rate limit exceeded. Try again later.");
-
     let sessionId = url.query['session'] as string;
     if (!sessionId)
       return new FaucetHttpResponse(400, "Bad Request", "Missing session parameter");
@@ -293,6 +288,11 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     let session = ServiceManager.GetService(SessionManager).getSession(sessionId, [FaucetSessionStatus.RUNNING]);
     if (!session)
       return new FaucetHttpResponse(404, "Not Found", "Session not found");
+
+    // The agent API sits behind a shared proxy IP. Rate-limit each authenticated
+    // mining session so one user's work does not throttle unrelated sessions.
+    if(!this.restRateLimiter.isAllowed(sessionId))
+      return new FaucetHttpResponse(429, "Too Many Requests", "Rate limit exceeded. Try again later.");
 
     if(session.getSessionData<Array<string>>("skip.modules", []).indexOf(this.moduleName) !== -1)
       return new FaucetHttpResponse(400, "Bad Request", "PoW module is skipped for this session");
@@ -359,11 +359,6 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     if (req.method !== "POST")
       return new FaucetHttpResponse(405, "Method Not Allowed");
 
-    let webApi = ServiceManager.GetService(FaucetWebApi);
-    let remoteIp = webApi.getRemoteAddr(req);
-    if(!this.restRateLimiter.isAllowed(remoteIp))
-      return { valid: false, error: "Rate limit exceeded. Try again later." };
-
     let input: any;
     try {
       input = JSON.parse(body.toString("utf8"));
@@ -382,6 +377,9 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     if (!session)
       return { valid: false, error: "Session not found or not running" };
 
+    if(!this.restRateLimiter.isAllowed(input.session))
+      return { valid: false, error: "Rate limit exceeded. Try again later." };
+
     if(session.getSessionData<Array<string>>("skip.modules", []).indexOf(this.moduleName) !== -1)
       return { valid: false, error: "PoW module is skipped for this session" };
 
@@ -391,6 +389,10 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     let restSubmittedNonce = session.getSessionData("pow.restSubmittedNonce", -1) as number;
     if (nonce <= restSubmittedNonce || nonce >= restNonceEnd)
       return { valid: false, error: "Nonce out of range or already submitted" };
+
+    // Reserve before awaiting the worker: concurrent copies of a valid share
+    // must not both pass the replay check and receive rewards.
+    session.setSessionData("pow.restSubmittedNonce", nonce);
 
     let powServer: PoWServer;
     try {
@@ -409,7 +411,6 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     }
 
     if (result.isValid) {
-      session.setSessionData("pow.restSubmittedNonce", nonce);
       session.setSessionData("pow.restSession", true);
       let rewardAmount = BigInt(this.moduleConfig.powShareReward);
       await session.addReward(rewardAmount);
@@ -428,11 +429,6 @@ export class PoWModule extends BaseModule<IPoWConfig> {
   }
 
   private async handlePowCloseSession(req: IncomingMessage, url: IFaucetApiUrl): Promise<any> {
-    let webApi = ServiceManager.GetService(FaucetWebApi);
-    let remoteIp = webApi.getRemoteAddr(req);
-    if(!this.restRateLimiter.isAllowed(remoteIp))
-      return new FaucetHttpResponse(429, "Too Many Requests", "Rate limit exceeded. Try again later.");
-
     let sessionId = url.query['session'] as string;
     if (!sessionId)
       return new FaucetHttpResponse(400, "Bad Request", "Missing session parameter");
@@ -441,7 +437,10 @@ export class PoWModule extends BaseModule<IPoWConfig> {
     if (!session)
       return new FaucetHttpResponse(404, "Not Found", "Session not found or not running");
 
-    this.processPoWSessionClose(session);
+    if(!this.restRateLimiter.isAllowed(sessionId))
+      return new FaucetHttpResponse(429, "Too Many Requests", "Rate limit exceeded. Try again later.");
+
+    await this.processPoWSessionClose(session);
     let info = await session.getSessionInfo();
     return info;
   }
